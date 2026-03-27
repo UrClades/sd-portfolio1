@@ -52,8 +52,7 @@ class LaneFilterNode(DTROS):
     def __init__(self, node_name):
         super(LaneFilterNode, self).__init__(
             node_name=node_name,
-            node_type=NodeType.PERCEPTION,
-            fsm_controlled=True
+            node_type=NodeType.PERCEPTION
         )
 
         self._filter = rospy.get_param("~lane_filter_histogram_configuration", None)

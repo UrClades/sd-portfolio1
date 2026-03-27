@@ -28,8 +28,7 @@ class AntiInstagramNode(DTROS):
 
         super(AntiInstagramNode, self).__init__(
             node_name=node_name,
-            node_type=NodeType.PERCEPTION,
-            fsm_controlled=True
+            node_type=NodeType.PERCEPTION
         )
 
         # Read parameters
