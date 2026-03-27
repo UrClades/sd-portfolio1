@@ -1,2 +1,2 @@
-git+https://github.com/duckietown/lib-dt-computer-vision@daffy
-git+https://github.com/duckietown/lib-dt-state-estimation@daffy
+git+https://github.com/duckietown/lib-dt-computer-vision@ente
+git+https://github.com/duckietown/lib-dt-state-estimation@ente
