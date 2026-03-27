@@ -43,6 +43,7 @@ class LaneControllerNode(DTROS):
     Subscribers:
         ~lane_pose (:obj:`LanePose`): The lane pose estimate from the lane filter
         ~intersection_navigation_pose (:obj:`LanePose`): The lane pose estimate from intersection navigation
+        ~fsm_state (:obj:`FSMState`): The current FSM state
         ~wheels_cmd_executed (:obj:`WheelsCmdStamped`): Confirmation that the control action was executed
         ~stop_line_reading (:obj:`StopLineReading`): Distance from stopline, to reduce speed
         ~obstacle_distance_reading (:obj:`stop_line_reading`): Distancefrom obstacle virtual stopline, to reduce speed
@@ -107,6 +108,7 @@ class LaneControllerNode(DTROS):
         )
 
         # Construct subscribers
+        self.sub_fsm_node = rospy.Subscriber("~fsm_state", FSMState, self.cbMode, queue_size=1)
         self.sub_lane_reading = rospy.Subscriber(
             "~lane_pose", LanePose, self.cbAllPoses, "lane_filter", queue_size=1
         )
@@ -153,10 +155,11 @@ class LaneControllerNode(DTROS):
             self.log("Pose source: %s" % self.current_pose_source)
 
     def cbAllPoses(self, input_pose_msg, pose_source):
-        if pose_source == self.current_pose_source:
-            self.pose_msg_dict[pose_source] = input_pose_msg
-            self.pose_msg = input_pose_msg
-            self.getControlAction(self.pose_msg)
+        if self.fsm_state == "LANE_FOLLOWING":
+            if pose_source == self.current_pose_source:
+                self.pose_msg_dict[pose_source] = input_pose_msg
+                self.pose_msg = input_pose_msg
+                self.getControlAction(self.pose_msg)
 
     def cbWheelsCmdExecuted(self, msg_wheels_cmd):
         self.wheels_cmd_executed = msg_wheels_cmd
