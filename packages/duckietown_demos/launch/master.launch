@@ -66,8 +66,8 @@
 	<!-- Lane Controller: Computes steering and speed commands -->
 	<group if="$(arg /lane_following/lane_controller)">
 		<remap from="lane_controller_node/lane_pose" to="lane_filter_node/lane_pose"/>
-		<remap from="lane_controller_node/wheels_cmd" to="wheels_driver_node/wheels_cmd" />
-		<remap from="lane_controller_node/car_cmd" to="kinematics_node/car_cmd"/>
+		<remap from="lane_controller_node/wheels_cmd" to="wheels_driver_node/wheels_cmd"/>
+		<remap from="lane_controller_node/wheels_cmd_out" to="wheels_driver_node/wheels_cmd"/>
 		<include file="$(find lane_control)/launch/lane_controller_node.launch">
 			<arg name="veh" value="$(arg veh)"/>
 			<arg name="param_file_name" value="$(arg param_file_name)"/>

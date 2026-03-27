@@ -39,7 +39,7 @@ class LaneControllerNode(DTROS):
         ~stop_line_slowdown (:obj:`dict`): Start and end distances for slowdown at stop lines
 
     Publisher:
-        ~car_cmd (:obj:`Twist2DStamped`): The computed control action
+        ~wheels_cmd_out (:obj:`WheelsCmdStamped`): The computed wheel commands
     Subscribers:
         ~lane_pose (:obj:`LanePose`): The lane pose estimate from the lane filter
         ~intersection_navigation_pose (:obj:`LanePose`): The lane pose estimate from intersection navigation
@@ -53,11 +53,10 @@ class LaneControllerNode(DTROS):
         # Initialize the DTROS parent class
         super(LaneControllerNode, self).__init__(
             node_name=node_name,
-            node_type=NodeType.PERCEPTION
+            node_type=NodeType.PERCEPTION,
         )
 
         # Add the node parameters to the parameters dictionary
-        # TODO: MAKE TO WORK WITH NEW DTROS PARAMETERS
         self.params = dict()
         self.params["~v_bar"] = DTParam("~v_bar", param_type=ParamType.FLOAT, min_value=0.0, max_value=5.0)
         self.params["~k_d"] = DTParam("~k_d", param_type=ParamType.FLOAT, min_value=-100.0, max_value=100.0)
@@ -68,9 +67,7 @@ class LaneControllerNode(DTROS):
         self.params["~k_Iphi"] = DTParam(
             "~k_Iphi", param_type=ParamType.FLOAT, min_value=-100.0, max_value=100.0
         )
-        #self.params["~theta_thres"] = rospy.get_param("~theta_thres", None)
-        #Breaking up the self.params["~theta_thres"] parameter for more finer tuning of phi
-        self.params["~theta_thres_min"] = DTParam("~theta_thres_min", param_type=ParamType.FLOAT, min_value=-100.0, max_value=100.0)  #SUGGESTION mandatorizing the use of DTParam inplace of rospy.get_param for parameters in the entire dt-core repository as it allows active tuning while Robot is in action.
+        self.params["~theta_thres_min"] = DTParam("~theta_thres_min", param_type=ParamType.FLOAT, min_value=-100.0, max_value=100.0)
         self.params["~theta_thres_max"] = DTParam("~theta_thres_max", param_type=ParamType.FLOAT, min_value=-100.0, max_value=100.0)
         self.params["~d_thres"] = rospy.get_param("~d_thres", None)
         self.params["~d_offset"] = rospy.get_param("~d_offset", None)
@@ -83,7 +80,6 @@ class LaneControllerNode(DTROS):
 
         # Need to create controller object before updating parameters, otherwise it will fail
         self.controller = LaneController(self.params)
-        # self.updateParameters() # TODO: This needs be replaced by the new DTROS callback when it is implemented
 
         # Initialize variables
         self.fsm_state = None
@@ -101,9 +97,13 @@ class LaneControllerNode(DTROS):
 
         self.current_pose_source = "lane_filter"
 
+        # Kinematics constants
+        self.wheel_baseline = 0.1
+        self.wheel_radius = 0.0318
+
         # Construct publishers
-        self.pub_car_cmd = rospy.Publisher(
-            "~car_cmd", Twist2DStamped, queue_size=1, dt_topic_type=TopicType.CONTROL
+        self.pub_wheels_cmd = rospy.Publisher(
+            "~wheels_cmd_out", WheelsCmdStamped, queue_size=1, dt_topic_type=TopicType.CONTROL
         )
 
         # Construct subscribers
@@ -130,85 +130,47 @@ class LaneControllerNode(DTROS):
         self.log("Initialized!")
 
     def cbObstacleStopLineReading(self, msg):
-        """
-        Callback storing the current obstacle distance, if detected.
-
-        Args:
-            msg(:obj:`StopLineReading`): Message containing information about the virtual obstacle stopline.
-        """
         self.obstacle_stop_line_distance = np.sqrt(msg.stop_pose.x**2 + msg.stop_pose.y**2)
         self.obstacle_stop_line_detected = msg.stop_line_detected
         self.at_stop_line = msg.at_stop_line
         if not self.obstacle_stop_line_detected:
             self.obstacle_stop_line_distance = None
 
-
     def cbStopLineReading(self, msg):
-        """Callback storing current distance to the next stopline, if one is detected.
-
-        Args:
-            msg (:obj:`StopLineReading`): Message containing information about the next stop line.
-        """
         self.stop_line_distance = -msg.stop_pose.x
         self.stop_line_detected = msg.stop_line_detected
         self.at_obstacle_stop_line = msg.at_stop_line
         if not self.stop_line_detected:
             self.stop_line_distance = None
 
-
     def cbMode(self, fsm_state_msg):
-
-        self.fsm_state = fsm_state_msg.state  # String of current FSM state
-
+        self.fsm_state = fsm_state_msg.state
         if self.fsm_state == "INTERSECTION_CONTROL":
             self.current_pose_source = "intersection_navigation"
         else:
             self.current_pose_source = "lane_filter"
-
         if self.params["~verbose"] == 2:
             self.log("Pose source: %s" % self.current_pose_source)
 
     def cbAllPoses(self, input_pose_msg, pose_source):
-        """Callback receiving pose messages from multiple topics.
-
-        If the source of the message corresponds with the current wanted pose source, it computes a control command.
-
-        Args:
-            input_pose_msg (:obj:`LanePose`): Message containing information about the current lane pose.
-            pose_source (:obj:`String`): Source of the message, specified in the subscriber.
-        """
-
         if pose_source == self.current_pose_source:
             self.pose_msg_dict[pose_source] = input_pose_msg
-
             self.pose_msg = input_pose_msg
-
             self.getControlAction(self.pose_msg)
 
     def cbWheelsCmdExecuted(self, msg_wheels_cmd):
-        """Callback that reports if the requested control action was executed.
-
-        Args:
-            msg_wheels_cmd (:obj:`WheelsCmdStamped`): Executed wheel commands
-        """
         self.wheels_cmd_executed = msg_wheels_cmd
 
     def publishCmd(self, car_cmd_msg):
-        """Publishes a car command message.
-
-        Args:
-            car_cmd_msg (:obj:`Twist2DStamped`): Message containing the requested control action.
-        """
-        self.pub_car_cmd.publish(car_cmd_msg)
+        v = car_cmd_msg.v
+        omega = car_cmd_msg.omega
+        wheels_msg = WheelsCmdStamped()
+        wheels_msg.header = car_cmd_msg.header
+        wheels_msg.vel_left = (v - omega * self.wheel_baseline / 2) / self.wheel_radius
+        wheels_msg.vel_right = (v + omega * self.wheel_baseline / 2) / self.wheel_radius
+        self.pub_wheels_cmd.publish(wheels_msg)
 
     def getControlAction(self, pose_msg):
-        """Callback that receives a pose message and updates the related control command.
-
-        Using a controller object, computes the control action using the current pose estimate.
-
-        Args:
-            pose_msg (:obj:`LanePose`): Message containing information about the current lane pose.
-        """
         current_s = rospy.Time.now().to_sec()
         dt = None
         if self.last_s is not None:
@@ -218,12 +180,9 @@ class LaneControllerNode(DTROS):
             v = 0
             omega = 0
         else:
-
-            # Compute errors
             d_err = pose_msg.d - self.params["~d_offset"]
             phi_err = pose_msg.phi
 
-            # We cap the error if it grows too large
             if np.abs(d_err) > self.params["~d_thres"]:
                 d_err = np.sign(d_err) * self.params["~d_thres"]
 
@@ -235,23 +194,17 @@ class LaneControllerNode(DTROS):
                 v, omega = self.controller.compute_control_action(
                     d_err, phi_err, dt, wheels_cmd_exec, self.obstacle_stop_line_distance
                 )
-                # TODO: This is a temporarily fix to avoid vehicle image detection latency caused unable to stop in time.
                 v = v * 0.25
                 omega = omega * 0.25
-
             else:
                 v, omega = self.controller.compute_control_action(
                     d_err, phi_err, dt, wheels_cmd_exec, self.stop_line_distance
                 )
 
-            # For feedforward action (i.e. during intersection navigation)
             omega += self.params["~omega_ff"]
 
-        # Initialize car control msg, add header from input message
         car_control_msg = Twist2DStamped()
         car_control_msg.header = pose_msg.header
-
-        # Add commands to car message
         car_control_msg.v = v
         car_control_msg.omega = omega
 
@@ -259,13 +212,9 @@ class LaneControllerNode(DTROS):
         self.last_s = current_s
 
     def cbParametersChanged(self):
-        """Updates parameters in the controller object."""
-
         self.controller.update_parameters(self.params)
 
 
 if __name__ == "__main__":
-    # Initialize the node
     lane_controller_node = LaneControllerNode(node_name="lane_controller_node")
-    # Keep it spinning
     rospy.spin()
