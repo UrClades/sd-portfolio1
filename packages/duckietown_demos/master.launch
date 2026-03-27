@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<launch>
+	<!-- Arguments -->
+	<arg name="veh" default="$(env VEHICLE_NAME)"
+         doc="The name of the robot (e.g., autobot01, watchtower02, ...)"/>
+	<arg name="robot_type" default="$(env ROBOT_TYPE)"
+         doc="The type of the robot (e.g., duckiebot, watchtower, ...)"/>
+	<arg name="robot_configuration" default="$(env ROBOT_CONFIGURATION)"
+         doc="The configuration of the robot (e.g., DB19, DB20, ...)"/>
+	<arg name="demo_name" doc="Name of demo (required)"/>
+	<arg name="camera_topic" default="camera_node"/>
+	<arg name="param_file_name" default="default" />
+	<arg name="line_detector_param_file_name" default="$(arg param_file_name)"/>
+	<arg name="traffic_mode" default="RHT" doc="Left/Right-hand traffic"/>
+	<arg name="verbose" default="false" />
+	<arg name="visualization" default="false" />
+
+	<!-- Lane Following Components -->
+	<arg name="anti_instagram" default="false"/>
+	<arg name="/lane_following/line_detection" default="false"/>
+	<arg name="/lane_following/ground_projection" default="false"/>
+	<arg name="/lane_following/lane_filter" default="false"/>
+	<arg name="/lane_following/lane_controller" default="false"/>
+
+	<!-- Anti-Instagram: Color correction for robust line detection -->
+	<group if="$(arg anti_instagram)">
+		<remap from="anti_instagram_node/uncorrected_image/compressed" to="$(arg camera_topic)/image/compressed"/>
+		<include file="$(find anti_instagram)/launch/anti_instagram_node.launch">
+			<arg name="veh" value="$(arg veh)"/>
+		</include>
+	</group>
+
+	<!-- Line Detector: Detects lane markings -->
+	<group if="$(arg /lane_following/line_detection)">
+		<remap from="line_detector_node/thresholds" to="anti_instagram_node/thresholds"/>
+		<remap from="line_detector_node/image/compressed" to="$(arg camera_topic)/image/compressed"/>
+		<include file="$(find line_detector)/launch/line_detector_node.launch">
+			<arg name="veh" value="$(arg veh)"/>
+			<arg name="param_file_name" value="$(arg line_detector_param_file_name)"/>
+			<arg name="traffic_mode" value="$(arg traffic_mode)"/>
+		</include>
+	</group>
+
+	<!-- Ground Projection: Projects lane segments to ground plane -->
+	<group if="$(arg /lane_following/ground_projection)">
+		<remap from="ground_projection_node/lineseglist_in" to="line_detector_node/segment_list"/>
+		<remap from="ground_projection_node/camera_info" to="$(arg camera_topic)/camera_info"/>
+		<remap from="ground_projection_node/image/compressed" to="$(arg camera_topic)/image/compressed"/>
+		<include file="$(find ground_projection)/launch/ground_projection_node.launch">
+			<arg name="veh" value="$(arg veh)"/>
+			<arg name="param_file_name" value="$(arg param_file_name)"/>
+		</include>
+	</group>
+
+	<!-- Lane Filter: Estimates lane position (d, phi) -->
+	<group if="$(arg /lane_following/lane_filter)">
+		<remap from="lane_filter_node/segment_list" to="ground_projection_node/lineseglist_out"/>
+		<remap from="lane_filter_node/left_wheel_encoder_driver_node/tick" to="left_wheel_encoder_driver_node/tick"/>
+		<remap from="lane_filter_node/right_wheel_encoder_driver_node/tick" to="right_wheel_encoder_driver_node/tick"/>
+		<include file="$(find lane_filter)/launch/lane_filter_node.launch">
+			<arg name="veh" value="$(arg veh)"/>
+			<arg name="param_file_name" value="$(arg param_file_name)"/>
+		</include>
+	</group>
+
+	<!-- Lane Controller: Computes steering and speed commands -->
+	<group if="$(arg /lane_following/lane_controller)">
+		<remap from="lane_controller_node/lane_pose" to="lane_filter_node/lane_pose"/>
+		<remap from="lane_controller_node/wheels_cmd" to="wheels_driver_node/wheels_cmd" />
+		<include file="$(find lane_control)/launch/lane_controller_node.launch">
+			<arg name="veh" value="$(arg veh)"/>
+			<arg name="param_file_name" value="$(arg param_file_name)"/>
+		</include>
+	</group>
+
+</launch>
